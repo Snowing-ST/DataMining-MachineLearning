@@ -1,0 +1,147 @@
+---
+title: "分类"
+author: "司徒雪颖——中央财经大学"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+#导入数据与预处理
+```{r,warning=FALSE,message=FALSE}
+library(ggplot2)
+library(lattice)
+library(corrplot)
+library(grid)
+library(cluster)
+library(dplyr)
+library(clustMixType)
+library(randomForest)
+library(pROC)  
+library(gbm)
+
+setwd("E:/graduate/class/data_mining_machine_learning/songjie/final_hw")
+# credit = read_excel("default of credit card clients.xls",skip = 1)
+credit = read.csv("default of credit card clients.csv",header = T,skip = 1)
+
+credit$EDUCATION[credit$EDUCATION>4 ] = 4
+credit$EDUCATION[credit$EDUCATION<1] = 4
+credit$EDUCATION = factor(credit$EDUCATION,levels = c(1,2,3,4),
+                          labels = c("graduate school","university",
+                                     "high school","others"))
+credit$MARRIAGE = factor(credit$MARRIAGE,levels = c(0,1,2,3),
+                         labels = c("others","married","single","divorce"))
+credit$SEX = factor(credit$SEX,levels = c(1,2),
+                         labels = c("male","female"))
+credit$default.payment.next.month = factor(credit$default.payment.next.month,
+                                           levels = c(0,1),
+                                           labels = c("not_default","default"))
+```
+
+
+#分类
+
+## 划分训练集与测试集
+```{r,warning=FALSE,message=FALSE}
+set.seed(1234)  
+train=sample(1:nrow(credit), round(0.6* nrow(credit)))  #抽取60%作为训练集
+```
+## bagging
+```{r,warning=FALSE,message=FALSE}
+cr_bag=randomForest(default.payment.next.month~., credit[train,-1], mtry=ncol(credit[,-1])-1)  
+cr_bag
+plot(cr_bag)
+#测试
+cr_bag.pred = predict(cr_bag, credit[-train,-1])
+#测试错误率
+table(cr_bag.pred,credit[-train,"default.payment.next.month"])
+mean((cr_bag.pred!=credit[-train,"default.payment.next.month"]))
+#ROC
+y.true = as.numeric(credit[-train,"default.payment.next.month"])
+y.pre.bag = as.numeric(cr_bag.pred)
+modelroc.bag <- roc(y.true,y.pre.bag)  
+plot(modelroc.bag, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),  
+     grid.col=c("green", "red"), max.auc.polygon=TRUE,  
+     auc.polygon.col="skyblue", print.thres=TRUE)  
+modelroc.bag$auc
+```
+
+
+## randomforest
+```{r,warning=FALSE,message=FALSE}
+cr_rf=randomForest(default.payment.next.month~., credit[train,-1],importance=T,
+                   ntree = 500,mtry = 5)
+cr_rf
+###测试
+cr_rf.pred = predict(cr_rf, credit[-train,-1])
+#测试错误率
+table(cr_rf.pred,credit[-train,"default.payment.next.month"])
+mean((cr_rf.pred!=credit[-train,"default.payment.next.month"])) 
+plot(cr_rf)
+# 黑线是Out-of-Bag error rate，即用decision trees预测没有包括在bagging里样本的error
+# 其他两条线是因变量的两个class。
+varImpPlot(cr_rf, sort=TRUE) #PAY_0最重要
+cr_rf$importance
+#ROC
+y.true = as.numeric(credit[-train,"default.payment.next.month"])
+y.pre.rf = as.numeric(cr_rf.pred)
+modelroc.rf <- roc(y.true,y.pre.rf)  
+plot(modelroc.rf, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),  
+     grid.col=c("green", "red"), max.auc.polygon=TRUE,  
+     auc.polygon.col="skyblue", print.thres=TRUE)  
+modelroc.rf$auc
+```
+
+## adaboost
+```{r,warning=FALSE,message=FALSE}
+library(gbm)
+#因为AdaBoost算法要求响应值为0和1，故把变量y的值进行变换处理
+credit$y.num = as.numeric(credit$default.payment.next.month)-1
+set.seed(1234)
+cr_boost=gbm(y.num~.,credit[train,-c(1,25)], distribution="bernoulli", 
+               n.trees=1000,interaction.depth=4)
+cr_boost$train.error[seq(100,1000,100)] #训练误差减少
+summary(cr_boost)
+plot(cr_boost, i='PAY_0') #???查看变量的偏依赖图
+
+#训练精度最大时
+error = NULL
+seq_p0 = seq(min(cr_boost$fit),max(cr_boost$fit),0.01)
+for(p0 in seq_p0)
+{
+  a = cr_boost$fit>p0
+  b = credit[train,"y.num"]>0
+  error = c(error,mean(a!=b))
+}
+plot(seq_p0,error,type = "b")
+cbind(seq_p0,error)[which.min(error),] #此时训练误差最小
+p0= cbind(seq_p0,error)[which.min(error),1] #p0 = -0.6821474
+table(credit[train,"y.num"]>0,cr_boost$fit>p0)
+
+cr_boost.pred = predict(cr_boost, credit[-train,-c(1,25)], n.trees=1000)
+table(credit[-train,"y.num"]>0,cr_boost.pred>p0)
+mean((credit[-train,"y.num"]>0)!=(cr_boost.pred>p0)) #测试误差
+modelroc.ada0 <- roc(credit[-train,"y.num"],1*(cr_boost.pred>p0))
+plot(modelroc.ada0, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),
+     grid.col=c("green", "red"), max.auc.polygon=TRUE,
+     auc.polygon.col="skyblue", print.thres=TRUE)
+modelroc.ada0$auc
+
+#auc最大时
+modelroc.ada <- roc(credit[train,"y.num"],cr_boost$fit)  
+plot(modelroc.ada, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),  
+     grid.col=c("green", "red"), max.auc.polygon=TRUE,  
+     auc.polygon.col="skyblue", print.thres=TRUE)  
+modelroc.ada$auc
+
+p0 = -1.291
+cr_boost.pred = predict(cr_boost, credit[-train,-c(1,25)], n.trees=1000)
+table(credit[-train,"y.num"]>0,cr_boost.pred>p0)
+mean((credit[-train,"y.num"]>0)!=(cr_boost.pred>p0)) #测试误差
+modelroc.ada0 <- roc(credit[-train,"y.num"],1*(cr_boost.pred>p0))
+plot(modelroc.ada0, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),
+     grid.col=c("green", "red"), max.auc.polygon=TRUE,
+     auc.polygon.col="skyblue", print.thres=TRUE)
+modelroc.ada0$auc
+```

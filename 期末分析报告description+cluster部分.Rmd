@@ -1,0 +1,293 @@
+---
+title: "描述统计+聚类"
+author: "司徒雪颖——中央财经大学"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+#导入数据
+```{r,warning=FALSE,message=FALSE}
+library(ggplot2)
+library(lattice)
+library(corrplot)
+library(grid)
+library(cluster)
+library(dplyr)
+library(clustMixType)
+library(randomForest)
+library(pROC)  
+library(gbm)
+
+setwd("E:/graduate/class/data_mining_machine_learning/songjie/final_hw")
+# credit = read_excel("default of credit card clients.xls",skip = 1)
+credit = read.csv("default of credit card clients.csv",header = T,skip = 1)
+# head(credit)
+dim(credit)
+corrplot(cor(credit),tl.col = "black",method = "color",tl.cex = 0.6)
+
+credit$EDUCATION[credit$EDUCATION>4 ] = 4
+credit$EDUCATION[credit$EDUCATION<1] = 4
+credit$EDUCATION = factor(credit$EDUCATION,levels = c(1,2,3,4),
+                          labels = c("graduate school","university",
+                                     "high school","others"))
+credit$MARRIAGE = factor(credit$MARRIAGE,levels = c(0,1,2,3),
+                         labels = c("others","married","single","divorce"))
+credit$SEX = factor(credit$SEX,levels = c(1,2),
+                         labels = c("male","female"))
+credit$default.payment.next.month = factor(credit$default.payment.next.month,
+                                           levels = c(0,1),
+                                           labels = c("not_default","default"))
+summary(credit)
+```                                           
+
+# 描述统计
+## 单变量描述统计
+```{r,warning=FALSE,message=FALSE}
+p_age = ggplot(credit,aes(AGE))+
+  geom_histogram(fill = I("skyblue"),colour = I("white"),bins = 15);p_age
+p_amount = p_age+aes(LIMIT_BAL);p_amount
+p_edu = ggplot(credit,aes(x=factor(1),fill = EDUCATION))+geom_bar()+
+  coord_polar(theta="y");p_edu
+p_mar = p_edu+aes(x=factor(1),fill = MARRIAGE);p_mar
+p_default = p_edu+aes(x=factor(1),fill = default.payment.next.month);p_default
+table(credit$default.payment.next.month)/30000 #违约数不到四分之一
+```
+
+## 人口学特征交互作用
+```{r,warning=FALSE,message=FALSE}
+#学历越高，信用卡额度越大
+ggplot(credit,aes(EDUCATION,LIMIT_BAL))+geom_boxplot(outlier.colour = NA)+ylim(0,700000)
+#学历越高，结婚率越低
+table(credit$EDUCATION,credit$MARRIAGE)
+ggplot(credit,aes(EDUCATION,fill = MARRIAGE))+geom_bar(position="fill")
+```
+
+## 人口学特征与违约与否
+- 年龄、学历、婚姻状态与违约无明显关系
+```{r,warning=FALSE,message=FALSE}
+p_age_default = ggplot(credit,aes(default.payment.next.month,AGE))+
+  geom_boxplot(fill = I("skyblue"));p_age_default
+p_edu_default = ggplot(credit,aes(EDUCATION,fill = default.payment.next.month))+
+  geom_bar(position="fill");p_edu_default 
+p_marriage_default = p_edu_default+aes(x = MARRIAGE);p_marriage_default 
+```
+
+## PAY_N与违约与否
+- PAY_N如果取值为1、2则违约概率增大
+```{r,warning=FALSE,message=FALSE}
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(2,3)))
+vplayout <- function(x, y) {
+  viewport(layout.pos.row = x, layout.pos.col = y)
+}
+# 写循环批量绘图,只看前5根柱子，因为后面的柱子本身总数太少
+pay_i = c(0,2,3,4,5,6)
+for(i in 1:6)
+{
+  p_PAY_N = ggplot(credit,aes_string(paste("PAY_",pay_i[i],sep=""),fill = "default.payment.next.month"))+
+    geom_bar(position = "fill") +guides(fill=FALSE)
+
+  if (i < 4) {
+    print(p_PAY_N, vp = vplayout(1, i))
+  } else {
+    print(p_PAY_N, vp = vplayout(2, i - 3))
+  }
+}
+```
+
+## BILL_AMTN与违约与否
+- 无明显关系
+```{r,warning=FALSE,message=FALSE}
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(2,3)))
+vplayout <- function(x, y) {
+  viewport(layout.pos.row = x, layout.pos.col = y)
+}
+
+for(i in 1:6)
+{
+  p_BILL_AMTN = ggplot(credit,aes_string("default.payment.next.month",paste("BILL_AMT",i,sep = "")))+
+    geom_boxplot(outlier.colour = NA)+ylim(-20000,120000)
+  
+  if (i < 4) {
+    print(p_BILL_AMTN, vp = vplayout(1, i))
+  } else {
+    print(p_BILL_AMTN, vp = vplayout(2, i - 3))
+  }
+}
+```
+
+## PAY_AMTN与违约与否
+- 违约的话，PAY_AMTN的0值偏多，小提琴图倾向于正三角
+```{r,warning=FALSE,message=FALSE}
+p_PAY_AMTN = ggplot(credit,aes(default.payment.next.month,PAY_AMT1))+
+  geom_violin(outlier.colour = NA)+ylim(-10,12000);p_PAY_AMTN
+
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(2,3)))
+vplayout <- function(x, y) {
+  viewport(layout.pos.row = x, layout.pos.col = y)
+}
+
+for(i in 1:6)
+{
+  p_PAY_AMTN = ggplot(credit,aes_string("default.payment.next.month",paste("PAY_AMT",i,sep = "")))+
+    geom_violin()+geom_boxplot(width=.1,fill="black",outlier.colour=NA)+
+    stat_summary(fun.y=median,geom="point",shape=23,size=3,fill="white")+ylim(-10,12000)
+  
+  if (i < 4) {
+    print(p_PAY_AMTN, vp = vplayout(1, i))
+  } else {
+    print(p_PAY_AMTN, vp = vplayout(2, i - 3))
+  }
+}
+```
+
+## LIMIT_BAL与违约与否
+- 违约的客户，额度低的占比大
+```{r,warning=FALSE,message=FALSE}
+p_LIMIT_BAL = ggplot(credit,aes(fill = default.payment.next.month,x = LIMIT_BAL))+
+  geom_histogram(alpha=0.4)+xlim(0,600000);p_LIMIT_BAL
+ggplot(credit,aes(colour = default.payment.next.month,x = LIMIT_BAL))+
+  geom_density(alpha=0.4)+xlim(0,600000)
+```
+
+## 描述统计结论
+- 明显与违约与否相关的变量有LIMIT_BAL，PAY_N，PAY_AMTN
+                                           
+# 聚类
+## 简单随机抽样
+- 由于样本数有30000条，考虑到计算机设备性能较弱，因此抽取5000条样本进行聚类
+```{r,warning=FALSE,message=FALSE}
+set.seed(1994)
+samp = sample(c(1:dim(credit)[1]),5000,replace = F)
+data = credit[samp,]
+dim(data)
+table(data$default.payment.next.month)/5000 #比例变化不大
+```
+
+## Gower 距离聚类
+### Gower 距离的定义：
+- 首先每个类型的变量都有特殊的距离度量方法，而且该方法会将变量标准化到[0,1]之间。
+- 接下来，利用加权线性组合的方法来计算最终的距离矩阵。
+```{r,warning=FALSE,message=FALSE}
+library(cluster)
+gower_dist <- daisy(data[,c(-1,-25)],metric = "gower",type = list(logratio = 3))
+summary(gower_dist)
+gower_mat <- as.matrix(gower_dist)
+```
+
+
+- 我们将利用轮廓系数来确定最佳的聚类个数
+
+轮廓系数是一个用于衡量聚类离散度的内部指标，该指标的取值范围是[-1,1]，其数值越大越好。从下图可以看出，聚成10类最好。
+```{r,warning=FALSE,message=FALSE}
+sil_width <- c(NA)
+set.seed(1994)
+for(i in 2:10){
+  set.seed(1994)
+  pam_fit <- pam(gower_dist,diss = TRUE,k = i)
+  sil_width[i] <- pam_fit$silinfo$avg.width
+  }
+# Plot sihouette width (higher is better)
+
+qplot(c(1:10),sil_width,geom = c("line","point"),xlab = "聚类个数",ylab="轮廓系数")
+```
+
+### PAM（partioniong around medoids）算法构建模型
+
+- PAM 算法的主要步骤：
+1.随机选择 k 个数据点，并将其设为簇中心点
+2.遍历所有样本点，并将样本点归入最近的簇中
+3.对每个簇而言，找出与簇内其他点距离之和最小的点，并将其设为新的簇中心点
+4.重复第2步，直到收敛
+- 该算法和 K-means 算法非常相似。除了中心点的计算方法不同外，其他步骤都完全一致 。
+1.优点：简单易懂且不易受异常值所影响
+2.缺点：算法时间复杂度为 O(n2)
+```{r,warning=FALSE,message=FALSE}
+library(dplyr)
+set.seed(1994)
+pam_fit <- pam(gower_dist,diss = TRUE,k = 10)
+pam_results <- data %>%
+  dplyr::select(-ID) %>%
+  mutate(cluster = pam_fit$clustering) %>%
+  group_by(cluster) %>%
+  do(the_summary = summary(.))
+
+# print(pam_results$the_summary)#两类别的描述统计
+#中心点平行坐标图
+# data[pam_fit$medoids, ]
+parallel(~data[pam_fit$medoids,c(2,7:9,13:15,19:24)], data[pam_fit$medoids, ],
+          horizontal.axis= FALSE,xlab = "变量")
+```
+
+### 可视化方法
+- t-SNE 是一种降维方法，它可以在保留聚类结构的前提下，将多维信息压缩到二维或三维空间中。借助t-SNE我们可以将 PAM 算法的聚类结果绘制出来
+
+### 结论：聚类结果与违约与否无明显联系
+```{r,warning=FALSE,message=FALSE}
+library(Rtsne)
+tsne_obj <- Rtsne(gower_dist, is_distance = TRUE)
+tsne_data <- tsne_obj$Y %>%
+  data.frame() %>%
+  setNames(c("X", "Y")) %>%
+  mutate(cluster = factor(pam_fit$clustering),
+        name = data$ID)
+tsne_data1 = merge(tsne_data,data[,c(1,25)],by.x = "name",by.y = "ID")
+ggplot(aes(x = X, y = Y), data = tsne_data1) +
+  geom_jitter(aes(color = cluster,alpha = default.payment.next.month,shape = default.payment.next.month))
+```
+
+## k-prototype
+- K-prototype是处理混合属性聚类的典型算法，继承Kmean算法和Kmode算法的思想。
+- 在K-prototype算法中混合属性的相异度分为数值型变量和分类变量分开求，然后相加。
+```{r,warning=FALSE,message=FALSE}
+library(clustMixType)
+kp_fit = kproto(data[,-c(1,25)], 10, lambda = 0.8)
+# summary(kp_fit)
+#中心点平行坐标图
+# kp_fit$centers
+parallel(~kp_fit$centers[,c(1,6:8,12:14,18:23)], kp_fit$centers,
+         horizontal.axis= FALSE,xlab = "变量")
+#lambda设为多少都不合适，因为数值型变量方差太大，聚类结果几乎由数值型变量决定
+lambdaest(data[,-c(1,25)], num.method = 2, fac.method = 1, outtype = "numeric")
+
+```
+
+
+## k-means 
+- 只使用数值型变量进行kmeans聚类的结果与 k-prototype的结果几乎完全一致
+- 也就是说，只需要用数值型变量去聚类就好了，人口学信息可以不要
+### 根据within-cluster sum of squares即组内平方和确定聚类个数
+```{r,warning=FALSE,message=FALSE}
+wss = rep(0,9)
+for(i in 2:10)
+{
+  km_fit_i = kmeans(data[,c(2,7:24)],i)
+  wss[i-1] = sum(km_fit_i$withinss)
+}
+qplot(2:10, wss, geom = c("line","point"), xlab="Number of Clusters",ylab="Within groups sum of squares")
+```
+
+###kmeans聚类结果 
+```{r,warning=FALSE,message=FALSE}
+km_fit<-kmeans(data[,c(2,7:24)],10) #数值型变量做kmeans
+# km_fit$centers
+table(km_fit$cluster,kp_fit$cluster)
+parallel(~as.data.frame(km_fit$centers[,c(1:4,8:10,14:19)]), as.data.frame(km_fit$centers),
+         horizontal.axis= FALSE,xlab = "变量")
+```
+
+## 系统聚类
+- 与真实的违约与否没什么关系
+```{r,warning=FALSE,message=FALSE}
+d<-dist(data[,c(2,7:24)])
+hc<-hclust(d, method="complete")
+plot(hc)
+hccut<-cutree(hc,k=2) #将类别数定为2
+table(as.numeric(data$default.payment.next.month), hccut) 
+```
+
