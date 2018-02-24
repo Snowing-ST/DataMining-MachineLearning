@@ -1,0 +1,306 @@
+---
+title: "基于决策树的在线新闻热度预测"
+author: "司徒雪颖——中央财经大学"
+date: "2017年12月27日"
+output:
+  word_document: default
+  prettydoc::html_pretty:
+    highlight: github
+    theme: hpstr
+---
+
+## 摘要
+　　文章数据集来源于UCI网站的[OnlineNewsPopularity数据集](http://archive.ics.uci.edu/ml/datasets/Online+News+Popularity)，这是关于13-14年发表在Mashable网站的新闻数据，共4万条样本，63个变量。原有数据含有的因变量为文章的转发量，我们将1400作为分界点，将转发量大于等于1400的新闻标记为热门新闻，将小于1400的文章标记为非热门新闻。我们分别使用决策树、bagging、随机森林算法，根据新闻的特征预测新闻是否为热门新闻。建模发现，bagging和随机森林比决策树的预测效果好，预测错误率分别为33.7%，33.7%，38.3%。影响因素方面，文章主题、发表时间、关键字、参考链接类型等都对新闻热度有重要影响。
+
+
+## 研究目的
+　　随着互联网的发展，互联网媒体越来越受人们的关注。互联网信息具有量大、传播速度快的特点。一篇在线新闻可以在几天之内获得几十甚至上百万转发量，拥有极高的关注度，但与此同时，有的新闻则关注者寥寥。找到影响在线新闻热度的影响因素并提前预测在线新闻热度具有重要意义。对于政府的舆情监控系统来说，新闻热度的早期预测可以帮助舆情动向，及早发现并控制虚假、负面热点新闻，避免造成社会的不安定因素；对于作者来说，一方面可以帮助发掘更多具有价值的新闻话题，另一方面也可以据此更好地组织自己的文章，使之获得更广泛的关注；对于内容提供商来说，可以更好地挖掘用户需求，将此运用到内容选择、新闻推介等方面，吸引更多用户，扩大影响力；对于对于广告商来说，可以依据新闻热度的预测来设计广告宣传方案，合理安排广告投放；商家、社会活动组织者等也可以据此提前了解社会热点，做出关于广告投放、产品设计、活动宣传方案等方面的决策。
+
+　　一篇在线新闻的热度有非常多的影响因素，其影响方式也比较复杂，而且很多影响因素之间也具有相关性，为数据分析带来了很大的困难。一方面，很多影响因素存在于新闻文本本身，所以如何提取这些关键信息也很棘手，另一方面，在线新闻热度还与当时外部政治、经济、文化环境等相关，因而新闻发布的时机、发布的渠道等等诸多因素也会影响新闻如何提取、量化这些信息都为新闻热度预测带来挑战。因此，新闻热度的预测需要比较复杂的文本处理、数据分析技术，使得机器学习方法在该领域有非常广泛的应用。
+
+  
+## 读入数据
+```{r,warning=FALSE,message=FALSE}
+library(e1071)	
+library(corrplot)
+library(reshape2)#重构和整合数据集的工具包
+library(ggplot2)
+library(tree)
+library(randomForest)
+setwd("E:/graduate/class/data_mining_machine_learning/gunannan/OnlineNewsPopularity/")
+# getwd()
+news = read.csv("OnlineNewsPopularity.csv")
+dim(news)
+head(news,2)
+
+```
+
+## 变量介绍
+　　数据集的中英文变量名对照在附录
+
+|自变量||类型（变量数）|
+|:--|:--|:--|
+|与字数相关|标题字数|定量（1）|
+||文章字数|定量（1）|
+||单词平均长度|定量（1）|
+||只出现一次的单词的比例|比例（1）|
+||只出现一次且为非停用词的比例|比例（1）|
+|与链接相关|文章链接数（例如多种社交网站中）|定量（1）|
+||含有Mashable网其他文章的链接数目|定量（1）|
+||文章引用的Mashable网站的其他文章的最大、最小和平均转发量|定量（3）|
+|  与媒体相关|含有图片数目|定量（1）|
+||含有视频数目|定量（1）|
+|与时间相关|发布时间是否在星期几|布尔（7）|
+||发布时间是否在周末|布尔（1）|
+|  与关键字相关|关键字数目|定量（1）|
+||文章中最冷门关键字最大、最小和平均转发量|定量（3）|
+||文章中普通关键字最大、最小和平均转发量|定量（3）|
+||文章中最热门关键字最大、最小和平均转发量|定量（3）|
+||文章的类型：是否为（娱乐、科技等）类型|布尔（1）|
+|与内容相关|与前五个最相关的主题的相关程度|比例（5）|
+||标题主观性|比例（1）|
+||文章内容主观性和两极化得分及其绝对水平|比例（4）|
+||非中性词中肯定词、否定词的比重|比例（2）|
+||肯、否定词的两极化（最大、最小和平均）水平|比例（6）|
+|因变量||类型|
+||文章是否受欢迎|定量（1）|
+
+## 描述统计
+
+### 相关图矩阵
+- 可以看到，n_unique_tokens	 n_non_stop_words	 n_non_stop_unique_tokens相关性强
+self_reference_min_shares	 self_reference_max_shares	     self_reference_avg_sharess相关性强，因此稍后考虑删除一些变量。
+```{r,warning=FALSE,message=FALSE}
+mcor = cor(news[,3:60])
+# corrplot(mcor,order = "hclust",tl.col = "black",tl.cex = 0.7)
+corrplot(mcor,tl.col = "black",tl.cex = 0.7)
+```
+
+### 频道类别与分享数的关系
+```{r,warning=FALSE,message=FALSE}
+news.proc = news[,c(14:19,32:39,dim(news)[2])]
+strlist = strsplit(names(news.proc[,-15]),split = "_")
+newname = NULL
+for(list in strlist)
+{
+  newname = c(newname,list[length(list)])
+}
+colnames(news.proc) = c(newname,"shares")
+head(news.proc)
+```
+
+- 从图中可以看出，有6134多个没有频道类别，社交频道的新闻更容易获得高分享数
+```{r,warning=FALSE,message=FALSE}
+channel = matrix("unclassified",dim(news.proc)[1],1)
+for(i in 1:6)
+{
+  channel[news.proc[,i]==1] = names(news.proc[1:6])[i]
+}
+table(channel)
+news = cbind(news,channel)
+ggplot(news,aes(channel,shares))+coord_cartesian(ylim=c(0,10000))+
+  geom_boxplot(fill = I("skyblue"),outlier.shape = NA)
+```  
+  
+### 发布时间与分享数的关系
+
+- 周末新闻的分享数明显高于工作日
+```{r,warning=FALSE,message=FALSE}
+weekday = matrix(0,dim(news.proc)[1],1)
+for(i in 7:13)
+{
+  weekday[news.proc[,i]==1] = names(news.proc)[i]
+}
+table(weekday)
+news = cbind(news,weekday)
+ggplot(news,aes(weekday,shares))+coord_cartesian(ylim=c(0,8000))+
+  geom_boxplot(fill = I("skyblue"),outlier.shape = NA)
+```
+
+##建立模型
+
+### 删除相关性强的变量
+
+- n_unique_tokens	 n_non_stop_words	 n_non_stop_unique_tokens相关性太强，只保留 n_unique_tokens（其他强相关性变量删除情况参见附录）
+
+- 发布时间与新闻频道本为one-hot形式，现在归并为定性变量
+```{r,warning=FALSE,message=FALSE}
+dele_var_names = c("n_non_stop_words","n_non_stop_unique_tokens",
+                   "self_reference_min_shares","self_reference_max_shares",
+                   "kw_min_min", "kw_max_min","kw_max_avg")
+
+dele_var_num = which(names(news) %in% dele_var_names)
+
+news2 = news[,-c(1,2,dele_var_num,14:19,32:39)]
+```
+
+- 阈值设为1400，分享数高于1400的新闻则认为是热门新闻，低于1400则认为是非热门新闻
+- 之所以设为1400是因为这样能使得热门新闻与非热门新闻的数量几乎各占一半，有利于提高预测结果
+```{r,warning=FALSE,message=FALSE}
+D1 = 1400 
+news2$shares[news$shares>D1] = "popular"
+news2$shares[news$shares<=D1] = "unpopular"
+news2$shares = as.factor(news2$shares)
+table(news2$shares) #一半一半
+head(news2,2)
+```
+### 划分训练集测试集
+- 训练集、测试集各占一半
+```{r,warning=FALSE,message=FALSE}
+set.seed(1234)
+train=sample(1:nrow(news2),round(0.5*nrow(news2)))
+```
+
+### 决策树
+- 决策树的训练错误率为0.385 ，测试错误率为0.383
+- 只用了两个划分变量，分别是频道（channel）和文章中最普通关键字平均转发量（kw_avg_avg）
+```{r,warning=FALSE,message=FALSE}
+bio.tree=tree(shares~.-shares,news2[train,])
+summary(bio.tree)
+bio.tree.pred=predict(bio.tree,news2[-train,],type='class')
+table(bio.tree.pred,news2[-train,'shares'])
+p.tree=sum((bio.tree.pred!=news2[-train,'shares']))/nrow(news2[-train,])
+p.tree #预测错误率
+
+plot(bio.tree)
+text(bio.tree)
+```
+
+### bagging
+- bagging 设置的mtry数为特征数的二次根号
+- bagging训练错误率为 0.342，测试错误率为0.337，比决策树提升了5%
+```{r,warning=FALSE,message=FALSE}
+bio.bag = randomForest(shares~.,news2[train,],na.action = na.roughfix,
+                       mtry = round(sqrt(ncol(news2)-1),0))
+bio.bag
+bio.bag.pre = predict(bio.bag,news2[-train,])
+table(bio.bag.pre,news2[-train,'shares'])
+p.bag=sum((bio.bag.pre!=news2[-train,'shares']))/nrow(news2[-train,])
+p.bag #预测错误率
+```
+
+### 随机森林
+- 随机森林的mtry数为特征数的二次根号，使用了500棵树
+- 随机森林训练错误率为 0.34，测试错误率为0.337，与bagging效果相同
+
+```{r,warning=FALSE,message=FALSE}
+bio.rf = randomForest(shares~.,news2[train,],na.action = na.roughfix,
+                       importance=T,mtry = round(sqrt(ncol(news2)-1),0),
+                       ntree=500)
+bio.rf
+```
+
+
+- 袋外误差、训练集热门新闻预测误差、非热门新闻预测误差随树的棵树增加的变化图
+
+　　从下图来看，袋外误差、受欢迎类别和不受欢迎类别的误差均在100棵树时开始收敛，在200棵树时已基本稳定，此后一直在稳定水平上稍有波动，这也是为什么当树的棵树增加到250棵时预测效果反而比200棵树时稍差。此外还可看出对热门新闻的预测效果比非热门新闻的预测效果好。
+```{r,warning=FALSE,message=FALSE}
+plot(bio.rf)
+```
+
+- varImpPlot可实现重要变量可视化。
+
+　　影响平均精确度下降的重要变量是频道（channel）和文章中最普通关键字平均转发量（kw_avg_avg）；影响平均gini下降得重要变量是文章中最普通关键字平均转发量（kw_avg_avg）和文章引用的Mashable网站的其他文章的平均转发量（self_reference_avg_sharess）
+
+　　可以看出，文章的关键字对文章的受欢迎程度非常重要，我们猜测可能人们在搜索文章时一般采用关键字搜索，受欢迎的关键字增大了被搜索和阅读的几率，同时也代表文章主题也是人们所感兴趣的，增大了被转发的概率。排在第三、六、七位的均是与文章主题有关的变量，说明好的文章主题对于受欢迎度非常重要。所参考和引用的文献的受欢迎度对文章本身也有很重要的影响。
+
+　　在描述统计时也发现，社交频道的新闻更容易获得高分享数。
+
+```{r,warning=FALSE,message=FALSE}
+varImpPlot(bio.rf, sort=TRUE,n.var=10) 
+```
+
+- 预测错误率与bagging效果相同
+```{r,warning=FALSE,message=FALSE}
+bio.rf.pre = predict(bio.rf,news2[-train,])
+table(bio.rf.pre,news2[-train,'shares'])
+p.rf=sum((bio.rf.pre!=news2[-train,'shares']))/nrow(news2[-train,])
+p.rf #预测错误率
+```
+
+## 结论
+
+　　随着网络的扩张，预测在线新闻受欢迎程度有一定的意义。为预测新闻的可能受欢迎程度，我们首先用回归模型拟合数据，虽然均方误差小，但偏离均值太远的样本预测残差很大。事实上预测新闻热度并不需要准确地预测出转发数，只需知道它是否会成为一篇受欢迎的新闻就足够。以样本均值作为新闻是否受欢迎的分界点，我们用分类决策树算法，即决策树、bagging和随机森林预测一篇新闻能否成为一篇受欢迎的新闻。
+
+　　从上述分析可以看出，决策树算法测试错误率较高，最低仅为0.38，bagging算法无论在准确度，灵敏度，特异度方面都比决策树算法做得好，最优的测试错误率为0.337。随机森林测试错误率与bagging所差无几，灵敏度特异度均较好。
+
+## 附录
+
+### 因为多个变量强相关而删除变量情况
+- n_unique_tokens	 n_non_stop_words	 n_non_stop_unique_tokens相关性太强，只保留 n_unique_tokens（其他强相关性变量删除情况参见附录）
+- self_reference_min_shares	 self_reference_max_shares	 self_reference_avg_sharess相关性太强，只保留self_reference_avg_sharess
+- kw_max_max与kw_min_min 强负相关,只保留kw_max_max
+- kw_max_min与kw_avg_min强正相关，只保留kw_avg_min
+- kw_max_avg与kw_avg_avg强正相关，只保留kw_avg_avg
+- 第一第二列数据分别为新闻网址和距爬取新闻的时间，对预测无用，故删除
+
+### 变量信息
+
+1. n_tokens_title: Number of words in the title （标题字数）
+2. n_tokens_content: Number of words in the content （文章字数）
+3. n_unique_tokens: Rate of unique words in the content （文章唯一单词数（即只出现一次
+  的单词）的比例，0到1之间）
+4. n_non_stop_unique_tokens: Rate of unique non-stop words in the content 
+ （文章中唯一出现的且为非停用词:可检索或爬虫得到的词 的比例）
+5. num_hrefs: Number of links （文章链接数）
+6. num_self_hrefs: Number of links to other articles published by Mashable 
+  （文章中关于Mashable发布的其他文章的链接数）
+7. num_imgs: Number of images （图片数）
+8. num_videos: Number of videos （视频数）
+9. average_token_length: Average length of the words in the content （平均每个词的长度）
+10. num_keywords: Number of keywords in the metadata （元数据的关键词数）
+11. data_channel_is_lifestyle: Is data channel 'Lifestyle'? （生活服务类链接 是1否0）
+12. data_channel_is_entertainment: Is data channel 'Entertainment'? （娱乐类链接）
+13. data_channel_is_bus: Is data channel 'Business'? （商业类链接）
+14. data_channel_is_socmed: Is data channel 'Social Media'? （社交媒体类）
+15. data_channel_is_tech: Is data channel 'Tech'? （科技类）
+16. data_channel_is_world: Is data channel 'World'? （全球类）
+17. kw_min_min: Worst keyword (min. shares) （该文章中最冷门的关键字里的最小转发量）
+18. kw_max_min: Worst keyword (max. shares)  
+19. kw_avg_min: Worst keyword (avg. shares) 
+20. kw_min_max: Best keyword (min. shares) 
+21. kw_max_max: Best keyword (max. shares) 
+22. kw_avg_max: Best keyword (avg. shares) 
+23. kw_min_avg: Avg. keyword (min. shares) 
+24. kw_max_avg: Avg. keyword (max. shares) 
+25. kw_avg_avg: Avg. keyword (avg. shares) 
+26. self_reference_min_shares: Min. shares of referenced articles in Mashable （文章引用的
+   参考文章的最小转发量）
+27. self_reference_max_shares: Max. shares of referenced articles in Mashable 
+28. self_reference_avg_sharess: Avg. shares of referenced articles in Mashable 
+29. weekday_is_monday: Was the article published on a Monday? （是否周一发布）
+30. weekday_is_tuesday: Was the article published on a Tuesday? 
+31. weekday_is_wednesday: Was the article published on a Wednesday? 
+32. weekday_is_thursday: Was the article published on a Thursday? 
+33. weekday_is_friday: Was the article published on a Friday? 
+34. weekday_is_saturday: Was the article published on a Saturday? 
+35. weekday_is_sunday: Was the article published on a Sunday? 
+36. is_weekend: Was the article published on the weekend? （是否周末发布） 
+37. LDA_00: Closeness to LDA topic 0 
+  （得出五个相关性最大的主题，计算与每个主题的接近性）
+38. LDA_01: Closeness to LDA topic 1 
+39. LDA_02: Closeness to LDA topic 2 
+40. LDA_03: Closeness to LDA topic 3 
+41. LDA_04: Closeness to LDA topic 4 
+42. global_subjectivity: Text subjectivity （文章的主观性，0到1之间）
+43. global_sentiment_polarity: Text sentiment polarity （文章观点的两极化，-1到1之间）
+44. global_rate_positive_words: Rate of positive words in the content （肯定词的比重）
+45. global_rate_negative_words: Rate of negative words in the content （否定词的比重） 
+46. rate_positive_words: Rate of positive words among non-neutral tokens 
+（非中性词中肯定词的比重，对应每篇文章，该变量与下一变量值加和为一）
+47. rate_negative_words: Rate of negative words among non-neutral tokens 
+48. avg_positive_polarity: Avg. polarity of positive words （肯定词的平均极性，0到1之间）
+49. min_positive_polarity: Min. polarity of positive words 
+50. max_positive_polarity: Max. polarity of positive words 
+51. avg_negative_polarity: Avg. polarity of negative words （否定词的平均极性，-1到0之间）
+52. min_negative_polarity: Min. polarity of negative words 
+53. max_negative_polarity: Max. polarity of negative words 
+54. title_subjectivity: Title subjectivity （标题主观性）
+55. title_sentiment_polarity: Title polarity （标题的两极化，-1到1之间）
+56. abs_title_subjectivity: Absolute subjectivity level （内容的绝对主观性水平）
+57. abs_title_sentiment_polarity: Absolute polarity level （内容的绝对两极化水平）
+58. shares: Number of shares (target) （转发量）
+59. Popular: was the article popular? 
+  （文章是否受欢迎，是即转发量大于等于1400为1,否为-1。此变量为分类算法的因变量）
+
+
