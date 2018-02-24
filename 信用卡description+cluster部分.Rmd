@@ -8,7 +8,7 @@ output:
     highlight: github
 ---
 
-#导入数据
+# 导入数据
 ```{r,warning=FALSE,message=FALSE}
 library(ggplot2)
 library(lattice)
@@ -272,7 +272,7 @@ for(i in 2:10)
 qplot(2:10, wss, geom = c("line","point"), xlab="Number of Clusters",ylab="Within groups sum of squares")
 ```
 
-###kmeans聚类结果 
+### kmeans聚类结果 
 ```{r,warning=FALSE,message=FALSE}
 km_fit<-kmeans(data[,c(2,7:24)],10) #数值型变量做kmeans
 # km_fit$centers
@@ -290,4 +290,3 @@ plot(hc)
 hccut<-cutree(hc,k=2) #将类别数定为2
 table(as.numeric(data$default.payment.next.month), hccut) 
 ```
-
