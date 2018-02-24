@@ -8,7 +8,7 @@ output:
     highlight: github
 ---
 
-#导入数据与预处理
+# 导入数据与预处理
 ```{r,warning=FALSE,message=FALSE}
 library(ggplot2)
 library(lattice)
@@ -40,7 +40,7 @@ credit$default.payment.next.month = factor(credit$default.payment.next.month,
 ```
 
 
-#分类
+# 分类
 
 ## 划分训练集与测试集
 ```{r,warning=FALSE,message=FALSE}
