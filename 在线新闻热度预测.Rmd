@@ -117,7 +117,7 @@ ggplot(news,aes(weekday,shares))+coord_cartesian(ylim=c(0,8000))+
   geom_boxplot(fill = I("skyblue"),outlier.shape = NA)
 ```
 
-##建立模型
+## 建立模型
 
 ### 删除相关性强的变量
 
