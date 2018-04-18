@@ -8,7 +8,7 @@
 
 本研究主要目的在于利用商业智能与数据挖掘的技术整合，利用UCI中信用卡违约客户数据，使用聚类模型探索客户分类，并利用分类算法建立一套相对稳定且有效的预测模型，提供相关部门与发卡机构一个准则，以降低违约比例，进而降低信用风险。
 
-## [在线新闻热度预测.html](https://github.com/Snowing-ST/DataMining-MachineLearning/blob/master/%E5%9C%A8%E7%BA%BF%E6%96%B0%E9%97%BB%E7%83%AD%E5%BA%A6%E9%A2%84%E6%B5%8B.html)
+## [在线新闻热度预测.html](http://htmlpreview.github.io/?https://github.com/Snowing-ST/DataMining-MachineLearning/blob/master/%E5%9C%A8%E7%BA%BF%E6%96%B0%E9%97%BB%E7%83%AD%E5%BA%A6%E9%A2%84%E6%B5%8B.html)
 
 - [在线新闻热度预测.Rmd](https://github.com/Snowing-ST/DataMining-MachineLearning/blob/master/%E5%9C%A8%E7%BA%BF%E6%96%B0%E9%97%BB%E7%83%AD%E5%BA%A6%E9%A2%84%E6%B5%8B.Rmd)
 
